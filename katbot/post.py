@@ -137,7 +137,7 @@ def save_tweet(
     url: str | None = None,
 ) -> None:
     raw = json.dumps(
-        tweet.as_dict() | {"url": url} if url else {},
+        tweet.as_dict() | ({"url": url} if url else {}),
         ensure_ascii=False,
     )
     with Path(cfg.tweets_path).open("a", encoding="utf-8") as f:
