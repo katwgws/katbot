@@ -41,7 +41,7 @@ def request(
     r = requests.request(
         method,
         url,
-        headers={"User-Agent": "katbot/1.0 (+https://x.com)"}
+        headers={"User-Agent": f"{cfg.app_name}/1.0 (+https://x.com)"}
         | request_kwargs.pop("headers", {}),
         timeout=cfg.http_max_timeout,
         **request_kwargs,

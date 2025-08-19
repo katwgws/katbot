@@ -12,6 +12,7 @@ __all__: Final = ["cfg"]
 
 @dataclass(frozen=True, slots=True)
 class Config:
+    app_name: str
     model: str
     model_url: str = field(repr=False)
     twitter_api_key: str = field(repr=False)
