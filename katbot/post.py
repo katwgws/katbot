@@ -100,7 +100,7 @@ def generate_text(
 
 
 def make_tweet(**kwargs) -> Tweet:
-    if cfg.use_topic:
+    if random.random() < cfg.use_topic:
         topic = generate_topic()
         text = generate_text(system=topic, **kwargs)
         tweet = Tweet(text=text, topic=topic)
