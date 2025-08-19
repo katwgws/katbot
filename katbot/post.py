@@ -1,4 +1,4 @@
-"""https://github.com/katwgws/katbot"""
+# ⋅⋆•°☙ katbot/post.py ❧°•⋆⋅
 
 import hashlib
 import json
@@ -7,85 +7,15 @@ import random
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Final, Literal
+from typing import Any, Final
 from xml.etree import ElementTree as ET
 
-import requests
-from dotenv import load_dotenv
 from requests_oauthlib import OAuth1
-from tenacity import (
-    retry,
-    retry_if_exception,
-    stop_after_attempt,
-    wait_random_exponential,
-)
 
-load_dotenv()
+from .config import cfg
+from .http import request
 
-
-# -----------------------------------------------------------------------------
-#  Settings
-# -----------------------------------------------------------------------------
-
-
-DEBUG: Final = os.getenv("KATBOT_DEBUG", "").lower() in {"true", "yes"}
-
-HTTP_MAX_RETRIES: Final = 10
-HTTP_MAX_TIMEOUT: Final = 30.0
-
-USE_TOPIC: Final = os.getenv("KATBOT_USE_TOPIC", "").lower() in {"true", "yes"}
-TOPIC_API: Final = "https://trends.google.com/trending/rss?geo=US"
-
-MODEL: Final = os.getenv("KATBOT_MODEL", "")
-MODEL_URL: Final = os.getenv("KATBOT_MODEL_URL", "")
-
-MAX_TWEET_LEN: Final = 200
-MIN_TWEET_LEN: Final = 20
-TWEETS_PATH: Final = os.getenv("KATBOT_TWEETS_PATH", "./tweets.jsonl")
-
-TWT_API: Final = "https://api.x.com/2"
-TWT_BASE_URL: Final = "https://twitter.com/i/web/status/"
-
-
-# --- HTTP helper -------------------------------------------------------------
-
-
-def _can_retry(e: BaseException) -> bool:
-    if isinstance(e, requests.Timeout | requests.ConnectionError):
-        return True
-    if isinstance(e, requests.HTTPError):
-        try:
-            code = e.response.status_code
-        except Exception:
-            return False
-        return code in {429, 500, 520, 503, 504}
-    return False
-
-
-@retry(
-    wait=wait_random_exponential(max=HTTP_MAX_TIMEOUT),
-    stop=stop_after_attempt(HTTP_MAX_RETRIES),
-    retry=retry_if_exception(_can_retry),
-    reraise=True,
-)
-def request(
-    method: Literal["POST", "GET"],
-    url: str,
-    **request_kwargs: Any,
-) -> requests.Response:
-    r = requests.request(
-        method,
-        url,
-        headers={"User-Agent": "katbot/1.0 (+https://x.com)"}
-        | request_kwargs.pop("headers", {}),
-        timeout=HTTP_MAX_TIMEOUT,
-        **request_kwargs,
-    )
-    r.raise_for_status()
-    return r
-
-
-# --- Tweet dataclass ---------------------------------------------------------
+__all__: Final = ["Tweet", "run"]
 
 
 @dataclass(slots=True, frozen=True)
@@ -96,10 +26,10 @@ class Tweet:
 
     @property
     def abridged(self) -> str:
-        if len(self.text) <= MAX_TWEET_LEN:
+        if len(self.text) <= cfg.min_tweet_len:
             return self.text
         else:
-            return self.text[: max(0, MAX_TWEET_LEN - 3)] + "..."
+            return self.text[: max(0, cfg.max_tweet_len - 3)] + "..."
 
     @property
     def hash_id(self) -> str:
@@ -123,11 +53,8 @@ class Tweet:
         return self.as_str()
 
 
-# --- Generators --------------------------------------------------------------
-
-
 def generate_topic() -> str:
-    r = request("GET", TOPIC_API)
+    r = request("GET", cfg.topic_api)
     root_xml = ET.fromstring(r.content)
 
     titles = [
@@ -153,12 +80,12 @@ def generate_text(
     ]
 
     payload = {
-        "model": MODEL,
+        "model": cfg.model,
         "messages": messages,
         "stream": False,
     } | model_params
 
-    url = MODEL_URL.rstrip("/") + "/chat/completions"
+    url = cfg.model_url.rstrip("/") + "/chat/completions"
     headers = {"Content-Type": "application/json"}
     r = request("POST", url, headers=headers, json=payload)
 
@@ -169,11 +96,11 @@ def generate_text(
         raise RuntimeError(f"unexpected response schema: {data!r}") from e
 
 
-# --- Helpers -----------------------------------------------------------------
+# ⋅⋆•°☙ HELPERS ❧°•⋆⋅
 
 
 def make_tweet(**kwargs) -> Tweet:
-    if USE_TOPIC:
+    if cfg.use_topic:
         topic = generate_topic()
         text = generate_text(system=topic, **kwargs)
         tweet = Tweet(text=text, topic=topic)
@@ -186,17 +113,17 @@ def make_tweet(**kwargs) -> Tweet:
 
 def post_tweet(tweet: Tweet, **kwargs) -> str | None:
     try:
-        url = TWT_API.rstrip("/") + "/tweets"
+        url = cfg.twitter_api.rstrip("/") + "/tweets"
         payload = {"text": tweet.abridged} | kwargs
         auth = OAuth1(
-            os.getenv("KATBOT_TWT_API_KEY"),
-            os.getenv("KATBOT_TWT_API_SECRET"),
-            os.getenv("KATBOT_TWT_ACCESS_TOKEN"),
-            os.getenv("KATBOT_TWT_ACCESS_SECRET"),
+            cfg.twitter_api_key,
+            cfg.twitter_api_secret,
+            cfg.twitter_access_token,
+            cfg.twitter_access_secret,
         )
         r = request("POST", url, auth=auth, json=payload)
         tweet_id = r.json()["data"]["id"]
-        url = TWT_BASE_URL.rstrip("/") + f"/{tweet_id}"
+        url = cfg.twitter_base_url.rstrip("/") + f"/{tweet_id}"
         print(f"[Ok!]: {url}")
         return url
 
@@ -213,16 +140,13 @@ def save_tweet(
         tweet.as_dict() | {"url": url} if url else {},
         ensure_ascii=False,
     )
-    with Path(TWEETS_PATH).open("a", encoding="utf-8") as f:
+    with Path(cfg.tweets_path).open("a", encoding="utf-8") as f:
         f.write(raw + "\n")
         f.flush()
         os.fsync(f.fileno())
 
 
-# --- Main --------------------------------------------------------------------
-
-
-if __name__ == "__main__":
+def run():
     tweet = make_tweet()
-    url = post_tweet(tweet) if not DEBUG else None
+    url = post_tweet(tweet) if not cfg.debug else None
     save_tweet(tweet, url)
