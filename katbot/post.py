@@ -87,13 +87,20 @@ def generate_text(
 
     url = cfg.model_url.rstrip("/") + "/chat/completions"
     headers = {"Content-Type": "application/json"}
-    r = request("POST", url, headers=headers, json=payload)
 
-    data = r.json()
-    try:
-        return data["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError) as e:
-        raise RuntimeError(f"unexpected response schema: {data!r}") from e
+    while True:
+        r = request("POST", url, headers=headers, json=payload)
+        data = r.json()
+        text = str(data["choices"][0]["message"]["content"])
+
+        if cfg.min_tweet_len > len(text) > cfg.max_tweet_len:
+            continue
+        if (
+            text.endswith("..") or text.endswith("…")
+        ) and cfg.allow_ellipses > random.random():
+            continue
+
+        return text
 
 
 # ⋅⋆•°☙ HELPERS ❧°•⋆⋅
