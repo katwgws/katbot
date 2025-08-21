@@ -26,7 +26,7 @@ class Tweet:
 
     @property
     def abridged(self) -> str:
-        if len(self.text) <= cfg.min_tweet_len:
+        if len(self.text) <= cfg.max_tweet_len:
             return self.text
         else:
             return self.text[: max(0, cfg.max_tweet_len - 3)] + "..."
