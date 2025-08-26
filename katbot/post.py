@@ -93,11 +93,14 @@ def generate_text(
         data = r.json()
         text = str(data["choices"][0]["message"]["content"])
 
-        if cfg.min_tweet_len > len(text) > cfg.max_tweet_len:
-            continue
         if (
-            text.endswith("..") or text.endswith("…")
-        ) and cfg.allow_ellipses > random.random():
+            cfg.min_tweet_len > len(text) > cfg.max_tweet_len
+            or "@" in text
+            or "http" in text
+            or (text.endswith("..") and random.random() > cfg.allow_ellipses)
+            or (text.endswith("…") and random.random() > cfg.allow_ellipses)
+            or ("sorry" in text and random.random() > cfg.allow_apology)
+        ):
             continue
 
         return text
