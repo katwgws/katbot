@@ -24,8 +24,9 @@ class Config:
     tweets_path: Path = Path("./tweets.jsonl")
     max_tweet_len: int = 200
     min_tweet_len: int = 20
-    allow_ellipses: float = 0.1
     allow_apology: float = 0.1
+    allow_ball: float = 0.1
+    allow_ellipses: float = 0.1
     use_topic: float = 0.5
     topic_api: str = "https://trends.google.com/trending/rss?geo=US"
     http_max_retries: int = 10

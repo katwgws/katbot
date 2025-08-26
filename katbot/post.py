@@ -97,9 +97,10 @@ def generate_text(
             cfg.min_tweet_len > len(text) > cfg.max_tweet_len
             or "@" in text
             or "http" in text
+            or ("sorry" in text and random.random() > cfg.allow_apology)
+            or ("ball" in text and random.random() > cfg.allow_ball)
             or (text.endswith("..") and random.random() > cfg.allow_ellipses)
             or (text.endswith("…") and random.random() > cfg.allow_ellipses)
-            or ("sorry" in text and random.random() > cfg.allow_apology)
         ):
             continue
 
