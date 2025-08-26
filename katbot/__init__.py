@@ -10,7 +10,7 @@ __all__: Final = [
     "Tweet",
     "cfg",
     "load_tweets",
-    "post",
+    "post_tweet",
     "request",
     "save_tweets",
 ]

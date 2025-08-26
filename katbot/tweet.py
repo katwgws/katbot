@@ -16,14 +16,12 @@ from requests_oauthlib import OAuth1
 
 from .config import cfg
 from .http import request
-from .tweet import Tweet
 
 log = getLogger(__name__)
 
 __all__: Final = [
     "Tweet",
     "load_tweets",
-    "post_tweet",
     "save_tweets",
 ]
 
