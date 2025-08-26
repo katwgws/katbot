@@ -7,7 +7,9 @@ from typing import Any, Final
 
 from dotenv import load_dotenv
 
-__all__: Final = ["cfg"]
+__all__: Final = [
+    "cfg",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,12 +23,12 @@ class Config:
     twitter_access_secret: str = field(repr=False)
     twitter_api: str = "https://api.x.com/2"
     twitter_base_url: str = "https://twitter.com/i/web/status/"
-    tweets_path: Path = Path("./tweets.jsonl")
+    tweets_file: Path = Path("./tweets.jsonl")
+    max_generate_retries: int = 12
     max_tweet_len: int = 200
     min_tweet_len: int = 20
     allow_apology: float = 0.1
     allow_ball: float = 0.1
-    allow_ellipses: float = 0.1
     use_topic: float = 0.5
     topic_api: str = "https://trends.google.com/trending/rss?geo=US"
     http_max_retries: int = 10

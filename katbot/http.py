@@ -12,7 +12,9 @@ from tenacity import (
 
 from .config import cfg
 
-__all__: Final = ["request"]
+__all__: Final = [
+    "request",
+]
 
 
 def _can_retry(e: BaseException) -> bool:
