@@ -1,31 +1,30 @@
 # ⋅⋆•°☙ katbot/__main__.py ❧°•⋆⋅
 
 import logging
-import random
 
-from .config import cfg
-from .tweet import Tweet, load_tweets, post_tweet, save_tweets
+import click
+
+from .app import generate, post_one
 
 log = logging.getLogger()
 log.addHandler(logging.StreamHandler())
 log.setLevel(logging.INFO)
 
 
-def run() -> None:
-    tweets = load_tweets()
-    queue = [t for t in tweets if not t.url]
-    if queue:
-        log.info("Found %d unposted tweets", len(queue))
-        tweet = random.choice(queue)
-        log.info("Selected tweet: %s", tweet)
-        tweets.remove(tweet)
+@click.command(context_settings={"help_option_names": ["-h", "--help"]})
+@click.option(
+    "-g",
+    "--generate",
+    "generate_count",
+    type=click.IntRange(0, None),
+    default=0,
+    help="Generate N tweets and save without posting.",
+)
+def cli(generate_count: int) -> None:
+    if generate_count and generate_count > 0:
+        generate(generate_count)
     else:
-        log.info("No queued tweets, generating ...")
-        tweet = Tweet.generate()
-
-    tweet = post_tweet(tweet) if not cfg.debug else tweet
-    tweets.append(tweet)
-    save_tweets(tweets)
+        post_one()
 
 
-run()
+cli()
