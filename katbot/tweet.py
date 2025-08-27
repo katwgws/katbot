@@ -106,7 +106,7 @@ class Tweet:
                 {
                     "created_at": timestamp,
                     "hash_id": data.get("hash", _hash(data["text"])),
-                    "text": data.get("text") or data.get("tweet"),
+                    "text": data["text"],
                 }
                 | ({"topic": data["topic"]} if data.get("topic") else {})
                 | ({"url": data["url"]} if data.get("url") else {})
