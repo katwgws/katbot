@@ -99,9 +99,12 @@ class Tweet:
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> Self:
         try:
+            timestamp = datetime.now(UTC)
+            if data.get("created_at"):
+                timestamp = datetime.fromisoformat(data["created_at"])
             params = (
                 {
-                    "created_at": datetime.fromisoformat(data["created_at"]),
+                    "created_at": timestamp,
                     "hash_id": data.get("hash", _hash(data["text"])),
                     "text": data["text"],
                 }
