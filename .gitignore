@@ -12,7 +12,10 @@ wheels/
 # Local
 .env
 .vscode/
+data/
 python-version
 tweets.jsonl
 tokens.json
 uv.lock
+tags.py
+.python-version

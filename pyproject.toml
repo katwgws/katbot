@@ -1,16 +1,37 @@
 [project]
 name = "katbot"
-version = "1.0.1"
+version = "1.1.0"
 readme="README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.12"
 dependencies = [
-    "click",
+    "bitsandbytes",
+    "datasets",
+    "hf_xet",
+    "numpy",
+    "peft",
     "python-dotenv",
     "requests",
     "requests-oauthlib",
     "tenacity",
+    "torch",
+    "tqdm",
+    "transformers",
+    "trl",
     "tzdata",
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.uv.sources]
+torch = [
+   { index = "pytorch-cu128" }
+]
+torchvision = [
+  { index = "pytorch-cu128" }
 ]
 
 [dependency-groups]
