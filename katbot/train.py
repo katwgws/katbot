@@ -1,7 +1,6 @@
 import os
 import random
 import warnings
-from datetime import datetime
 from typing import Any, cast
 
 import numpy as np
@@ -56,7 +55,6 @@ if DRY_RUN:
 
 MAX_SEQ_LEN = 128
 EVAL_SPLIT = 0.08
-RECENCY_ALPHA = 0.2
 TWEET_TOKEN = "<|tweet|>"
 
 DATA_DIR = "./data"
@@ -78,7 +76,6 @@ LORA_CFG = LoraConfig(
     lora_dropout=0.05,
     bias="none",
     task_type="CAUSAL_LM",
-    modules_to_save=["embed_tokens", "lm_head"],
     target_modules=[
         "q_proj",
         "k_proj",
@@ -92,7 +89,6 @@ LORA_CFG = LoraConfig(
 
 SFT_CFG = SFTConfig(
     output_dir=MODEL_DIR,
-    max_length=MAX_SEQ_LEN,
     per_device_train_batch_size=2,
     gradient_accumulation_steps=4,
     num_train_epochs=3,
@@ -137,22 +133,6 @@ def _load_dataset(in_path: str, eval_split: float) -> tuple[Dataset, Dataset]:
         eval_ds = eval_ds.select(range(min(len(eval_ds), DRY_SAMPLE // 4)))
 
     return train_ds, eval_ds
-
-
-def _reweight_dataset(ds: Dataset, alpha: float) -> Dataset:
-    print("Applying recency bias ...")
-    ts = np.array(
-        [datetime.fromisoformat(str(d)).timestamp() for d in ds["date"]],
-        dtype=np.float64,
-    )
-    if ts.min() == ts.max():
-        return ds  # all weights equal, prevents divide by 0
-
-    score = (ts - ts.min()) / (ts.max() - ts.min())
-    w = 1.0 + alpha * (np.exp(score) - 1) / (np.e - 1)
-    idx = np.random.choice(len(ds), size=len(ds), replace=True, p=(w / w.sum()))
-
-    return ds.select(idx.tolist()).shuffle(SEED)
 
 
 def _map_dataset(train_ds: Dataset, eval_ds: Dataset, eos_token: str) -> tuple[Dataset, Dataset]:
@@ -201,7 +181,6 @@ def train(
     *,
     dataset_path: str = IN_PATH,
     eval_split: float = EVAL_SPLIT,
-    recency_alpha: float = RECENCY_ALPHA,
     base_model_name: str = BASE_MODEL,
     max_sequence_length: int = MAX_SEQ_LEN,
     lora_cfg=LORA_CFG,
@@ -218,9 +197,6 @@ def train(
         )
 
     train_ds, eval_ds = _load_dataset(dataset_path, eval_split)
-
-    if not DRY_RUN:
-        train_ds = _reweight_dataset(train_ds, recency_alpha)
 
     tokenizer = _make_tokenizer(base_model_name, max_sequence_length)
     train_ds, eval_ds = _map_dataset(train_ds, eval_ds, tokenizer.eos_token)
@@ -241,6 +217,7 @@ def train(
     )
 
     print("Setup complete! Training ...")
+    trainer.model.print_trainable_parameters()  # type: ignore
     trainer.train()
 
     print("Saving model ...")
