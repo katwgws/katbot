@@ -308,8 +308,8 @@ def main():
 
     mp.freeze_support()  # stop recursive imports on win32
 
-    train()
-    merge()
+    #train()
+    #merge()
     sample()
 
 

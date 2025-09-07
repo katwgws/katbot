@@ -1,47 +1,50 @@
+# katbot/tweet.py
+# - # - # - # - # - # - # - # - # - # - # - # - # - # - # - # - # - # - # - # -
+
 import json
 import logging
 import os
 import random
 import re
-import tempfile
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
-from hashlib import sha256
 from pathlib import Path
-from typing import Any, Self
+from typing import Any, Literal
 
+import requests
 from dotenv import load_dotenv
 from requests_oauthlib import OAuth1
 
-from .helpers import request
-
 load_dotenv()
-logger = logging.getLogger(__name__)
+
+log = logging.getLogger(__name__)
+if not logging.getLogger().handlers:
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
 MENTION_RE = re.compile(r"(^|[^@\w])@[\w_]{1,15}\b")
 URL_RE = re.compile(r"https?://", re.IGNORECASE)
+
+
+# Config
+# - # - # - # - # - # - # - # - # - # - # - # - # - # - # - # - # - # - # - # -
+
 
 SEED = int(os.environ["SEED"]) if os.getenv("SEED") else None
 if SEED is not None:
     random.seed(SEED)
 
-
-# - # - # - # - # - # - # - # - # - # - # - # - # - # - # - # - # - # - # - # -
-
-
 DRY_RUN = os.getenv("DRY_RUN", "").casefold().strip() in {"true", "yes", "1"}
+NO_POST = os.getenv("NO_POST", "").casefold().strip() in {"true", "yes", "1"}
+HTTP_MAX_TIMEOUT = 240
 
 MODEL = os.getenv("KATBOT_MODEL", "")
-if not MODEL:
-    raise RuntimeError("'KATBOT_MODEL' must be set in environment")
 MODEL_URL = os.getenv("MODEL_URL", "http://localhost:1234/v1")
 
 DATA_DIR = Path("./data")
-QUEUE_FILE = DATA_DIR / "tweet_queue.txt"
+QUEUE_FILE = DATA_DIR / "tweet_queue.jsonl"
 LOG_FILE = DATA_DIR / "tweet_log.jsonl"
 
-TEMPERATURE = float(os.getenv("TEMPERATURE", "0.7"))
+TEMPERATURE = float(os.getenv("TEMPERATURE", "1.1"))
 TOP_P = float(os.getenv("TOP_P", "0.9"))
 REPETITION_PENALTY = float(os.getenv("REPETITION_PENALTY", "1.08"))
 MAX_TOKENS = int(os.getenv("MAX_TOKENS", "32"))
@@ -53,68 +56,48 @@ TWEET_TOKEN = "<|tweet|>"
 TWEET_BASE_URL = "https://twitter.com/i/web/status/"
 TWITTER_URL = "https://api.x.com/2"
 TWITTER_APP_NAME = os.getenv("TWITTER_APP_NAME", "katbot")
-TWITTER_SECRETS: dict[str, Any] = {
-    "client_key": os.getenv("TWITTER_API_KEY"),
-    "client_secret": os.getenv("TWITTER_API_SECRET"),
-    "resource_owner_key": os.getenv("TWITTER_ACCESS_TOKEN"),
-    "resource_owner_secret": os.getenv("TWITTER_ACCESS_SECRET"),
-}
-for k, v in TWITTER_SECRETS.items():
-    if not v:
-        raise RuntimeError(f"'{k}' must be set in environment")
 
 
+# HTTP
 # - # - # - # - # - # - # - # - # - # - # - # - # - # - # - # - # - # - # - # -
 
 
-@dataclass(slots=True, frozen=True)
-class Tweet:
-    text: str
-    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
-    url: str | None = None
-
-    @property
-    def hash_id(self):
-        return sha256(self.text.encode("utf-8")).hexdigest()
-
-    @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> Self:
-        try:
-            return cls(
-                text=data["text"],
-                created_at=(
-                    datetime.fromisoformat(data["created_at"])
-                    if data.get("created_at")
-                    else datetime.now(UTC)
-                ),
-                url=data["url"] if data.get("url") else None,
-            )
-        except KeyError as e:
-            raise RuntimeError(f"Error parsing tweet: {data!r}") from e
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "hash": self.hash_id,
-            "created_at": self.created_at.isoformat(),
-            "text": self.text,
-            "length": len(self.text),
-        } | ({"url": self.url} if self.url else {})
-
-    def __repr__(self) -> str:
-        return f"{self.text} <{self.url}>" if self.url else self.text
+def request(
+    url: str,
+    method: Literal["POST", "GET"] = "GET",
+    **request_kwargs: Any,
+) -> requests.Response:
+    request_kwargs.setdefault("timeout", HTTP_MAX_TIMEOUT)
+    try:
+        r = requests.request(method, url, **request_kwargs)
+        r.raise_for_status()
+        return r
+    except Exception:
+        log.exception("HTTP error")
+        raise
 
 
-def _generate_text(
+# Generator
+# - # - # - # - # - # - # - # - # - # - # - # - # - # - # - # - # - # - # - # -
+
+
+def _generate_tweet(
+    model: str = MODEL,
+    model_url: str = MODEL_URL,
+    prompt: str = TWEET_TOKEN,
     *,
     temperature: float = TEMPERATURE,
     top_p: float = TOP_P,
     repetition_penalty: float = REPETITION_PENALTY,
     max_tokens: int = MAX_TOKENS,
-    **llm_kwargs,
+    **llm_kwargs: Any,
 ) -> str:
+    if not model:
+        raise RuntimeError("'KATBOT_MODEL' must be set in environment")
+
     payload = {
-        "model": MODEL,
-        "prompt": TWEET_TOKEN,
+        "model": model,
+        "prompt": prompt,
         "temperature": temperature,
         "top_p": top_p,
         "repetition_penalty": repetition_penalty,
@@ -122,140 +105,145 @@ def _generate_text(
         "stream": False,
     } | llm_kwargs
 
-    url = MODEL_URL.rstrip("/") + "/completions"
+    url = model_url.rstrip("/") + "/completions"
     headers = {"Content-Type": "application/json"}
-    r = request("POST", url, headers=headers, json=payload)
+    r = request(url, "POST", headers=headers, json=payload)
     data = r.json()
-
     try:
         return str(data["choices"][0]["text"])
     except (KeyError, IndexError, TypeError) as e:
         raise RuntimeError(f"Bad model response: {data!r}") from e
 
 
-def _validate_tweet(tweet: Tweet) -> bool:
+def _validate_tweet(
+    text: str,
+    *,
+    min_len: int = MIN_LENGTH,
+    max_len: int = MAX_LENGTH,
+) -> bool:
     return (
-        len(tweet.text) >= MIN_LENGTH
-        and len(tweet.text) <= MAX_LENGTH
-        and not MENTION_RE.search(tweet.text)
-        and not URL_RE.search(tweet.text)
+        len(text) >= min_len
+        and len(text) <= max_len
+        and not MENTION_RE.search(text)
+        and not URL_RE.search(text)
     )
 
 
-def generate_tweet() -> Tweet:
-    print("Generating tweet ...")
-
-    retries = MAX_RETRIES
-    while retries >= 0:
-        text = _generate_text().replace(TWEET_TOKEN, "").strip()
-        tweet = Tweet(text)
-
-        if _validate_tweet(tweet):
-            print(f"[🐣]: {tweet}")
-            return tweet
-
-        print(f"[🚫]: {tweet}")
-        retries -= 1
-    raise RuntimeError(f"No valid tweet after {MAX_RETRIES} attempts")
-
-
+# Queue
 # - # - # - # - # - # - # - # - # - # - # - # - # - # - # - # - # - # - # - # -
 
 
-def _atomic_write_text(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(
-        "w", encoding="utf-8", delete=False, dir=str(path.parent)
-    ) as tf:
-        tf.write(content)
-        tmp_name = tf.name
-    os.replace(tmp_name, path)
-
-
-def _append_jsonl(path: Path, obj: Mapping[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(obj, ensure_ascii=False) + "\n")
-
-
-def read_queue() -> list[str]:
-    if not QUEUE_FILE.is_file():
-        print(f"'{QUEUE_FILE}' not found, starting with empty queue.")
+def _load_jsonl(path: Path) -> list[dict[str, Any]]:
+    if not path.is_file():
+        log.warning("File not found: %s", path)
         return []
-    return [ln.strip() for ln in QUEUE_FILE.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    raw = path.read_text(encoding="utf-8")
+    lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+    return [json.loads(ln) for ln in lines]
 
 
-def write_queue(lines: Sequence[str]) -> None:
-    content = "\n".join(lines) + ("\n" if lines else "")
-    _atomic_write_text(QUEUE_FILE, content)
+def _save_jsonl(path: Path, data: Sequence[Mapping[str, Any]]):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    raw = [json.dumps(ln, ensure_ascii=False) for ln in data]
+    path.write_text("\n".join(raw), encoding="utf-8")
 
 
-def append_log(tweet: Tweet) -> None:
-    _append_jsonl(LOG_FILE, tweet.to_dict())
-
-
+# Twitter
 # - # - # - # - # - # - # - # - # - # - # - # - # - # - # - # - # - # - # - # -
 
 
-def post_tweet(tweet: Tweet) -> Tweet:
-    url = TWITTER_URL.rstrip("/") + "/tweets"
-    auth = OAuth1(**TWITTER_SECRETS)
-    payload = {"text": tweet.text}
-    headers = {"User-Agent": f"{TWITTER_APP_NAME}/1.0 (+https://x.com)"}
+def post_tweet(
+    text: str,
+    secrets: dict[str, Any] | None = None,
+    *,
+    base_url: str = TWEET_BASE_URL,
+    api_url: str = TWITTER_URL.rstrip("/") + "/tweets",
+    app_name: str = TWITTER_APP_NAME,
+) -> str | None:
+    log.info("Posting to: %s", api_url)
+    _secrets = secrets or {
+        "client_key": os.getenv("TWITTER_API_KEY"),
+        "client_secret": os.getenv("TWITTER_API_SECRET"),
+        "resource_owner_key": os.getenv("TWITTER_ACCESS_TOKEN"),
+        "resource_owner_secret": os.getenv("TWITTER_ACCESS_SECRET"),
+    }
+    for k, v in _secrets.items():
+        if not v:
+            raise RuntimeError(f"'{k}' must be set in environment")
+    auth = OAuth1(**_secrets)
 
     try:
-        r = request("POST", url, headers, auth=auth, json=payload)
-
+        r = request(
+            api_url,
+            "POST",
+            headers={"User-Agent": f"{app_name}/1.0 (+https://x.com)"},
+            auth=auth,
+            json={"text": text},
+        )
         tweet_id = r.json()["data"]["id"]
-        url = TWEET_BASE_URL.rstrip("/") + "/" + tweet_id
+        tweet_url = f"{base_url.rstrip('/')}/{tweet_id}"
+        log.info("🔗 Posted: %s", tweet_url)
+        return tweet_url
 
-        print(f"[📡]: {url}")
-        return replace(tweet, url=url)
-
-    except Exception as e:
-        print(f"[🚫]: {e}")
-        return tweet
+    except Exception:
+        return None
 
 
+# Main
 # - # - # - # - # - # - # - # - # - # - # - # - # - # - # - # - # - # - # - # -
 
 
-def main() -> None:
+def run_once(
+    *,
+    queue_file: Path = QUEUE_FILE,
+    log_file: Path = LOG_FILE,
+    gen_kwargs: Mapping[str, Any] | None = None,
+    max_retries: int = MAX_RETRIES,
+    validation_kwargs: Mapping[str, Any] | None = None,
+    post_kwargs: Mapping[str, Any] | None = None,
+) -> None:
+    log.info("Katbot v1.2 🤖")
     if DRY_RUN:
-        print("Dry run enabled, no posts will be made or files modified.")
+        log.info("Dry run enabled, no posts will be made or files modified.")
+    elif NO_POST:
+        log.info("Posting disabled, generating & queueing tweet only.")
 
-    queue = read_queue()
+    queue: list[str] = [t["text"] for t in _load_jsonl(queue_file)]
+    text = queue[0] if queue else ""
+    is_gen = False
 
-    picked_from_queue = False
-    if queue:
-        print(f"Found {len(queue):,} queued tweets.")
-        text = random.choice(queue)
-        picked_from_queue = True
-        tweet = Tweet(text=text)
-        print(f"[🐤]: {tweet}")
-    else:
-        tweet = generate_tweet()
+    if NO_POST or not text:
+        retries = max_retries
+        while retries > 0:
+            text = _generate_tweet(**(gen_kwargs or {}))
+            if _validate_tweet(text, **(validation_kwargs or {})):
+                queue.append(text)
+                is_gen = True
+                break
+            log.warning("Rejected: %s", text)
+            retries -= 1
+    if not text:
+        raise RuntimeError(f"No valid tweet after {max_retries} attempts")
+    log.info("🐣 %s: %s", "Generated" if is_gen else "Queued", text)
 
-    if DRY_RUN:
-        return
+    if not DRY_RUN and not NO_POST:
+        url = post_tweet(text, **(post_kwargs or {}))
+        if not url:
+            raise RuntimeError("Could not post tweet")
+        if text in queue:
+            queue.remove(text)
+        tweet = {
+            "text": text,
+            "posted_at": datetime.now(UTC).isoformat(),
+            "url": url,
+        }
+        posted = _load_jsonl(log_file)
+        posted.append(tweet)
+        _save_jsonl(log_file, posted)
 
-    posted = post_tweet(tweet)
-    if posted.url:
-        append_log(posted)
-        if picked_from_queue:
-            try:
-                idx = queue.index(tweet.text)
-                del queue[idx]
-            except ValueError:
-                pass
-            write_queue(queue)
-    else:
-        if picked_from_queue:
-            queue.append(tweet.text)
-            write_queue(queue)
-
-    print("All done! ✨")
+    if not DRY_RUN:
+        _save_jsonl(queue_file, [{"text": t.strip()} for t in queue if t.strip()])
 
 
 if __name__ == "__main__":
-    main()
+    run_once()
