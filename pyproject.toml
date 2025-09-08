@@ -9,6 +9,7 @@ dependencies = [
     "datasets",
     "hf_xet",
     "numpy",
+    "pandas",
     "peft",
     "python-dotenv",
     "requests",
