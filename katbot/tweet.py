@@ -209,7 +209,7 @@ def run_once(
         log.info("Posting disabled, generating & queueing tweet only.")
 
     queue: list[str] = [t["text"] for t in _load_jsonl(queue_file)]
-    text = random.choice(queue)
+    text = queue[0] if queue else ""
     is_gen = False
 
     if NO_POST or not text:
