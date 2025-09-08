@@ -15,8 +15,6 @@ import requests
 from dotenv import load_dotenv
 from requests_oauthlib import OAuth1
 
-load_dotenv()
-
 log = logging.getLogger(__name__)
 if not logging.getLogger().handlers:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -28,6 +26,8 @@ URL_RE = re.compile(r"https?://", re.IGNORECASE)
 # Config
 # - # - # - # - # - # - # - # - # - # - # - # - # - # - # - # - # - # - # - # -
 
+
+load_dotenv()
 
 SEED = int(os.environ["SEED"]) if os.getenv("SEED") else None
 if SEED is not None:
@@ -209,7 +209,7 @@ def run_once(
         log.info("Posting disabled, generating & queueing tweet only.")
 
     queue: list[str] = [t["text"] for t in _load_jsonl(queue_file)]
-    text = queue[0] if queue else ""
+    text = random.choice(queue)
     is_gen = False
 
     if NO_POST or not text:
@@ -246,4 +246,11 @@ def run_once(
 
 
 if __name__ == "__main__":
+    if not any(isinstance(h, logging.FileHandler) for h in log.handlers):
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        fh = logging.FileHandler(DATA_DIR / "katbot.log", encoding="utf-8")
+        fh.setLevel(logging.INFO)
+        fh.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+        log.addHandler(fh)
+
     run_once()
